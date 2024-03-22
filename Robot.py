@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy.core.fromnumeric import size
 from shapely.geometry import Point, LineString
+from typing import List, Tuple
 
 class Robot(object):
     
@@ -24,18 +25,26 @@ class Robot(object):
         @param prev_config Previous configuration.
         @param next_config Next configuration.
         '''
-        # TODO: Task 2.2
-
-        pass
+        return np.linalg.norm(np.array(prev_config) - np.array(next_config))
 
     def compute_forward_kinematics(self, given_config):
         '''
         Compute the 2D position (x,y) of each one of the links (including end-effector) and return.
         @param given_config Given configuration.
         '''
-        # TODO: Task 2.2
-
-        pass
+        positions = [(0,0)]
+        abs_angle = 0
+        for index, angle in enumerate(given_config):
+            prev_x, prev_y = positions[index]
+            abs_angle += angle
+            if abs_angle > np.pi:
+                abs_angle -= 2 * np.pi
+            elif abs_angle < -np.pi:
+                abs_angle += 2 * np.pi
+            x = self.links[index] * np.cos(abs_angle)
+            y = self.links[index] * np.sin(abs_angle)
+            positions.append((prev_x + x, prev_y + y))
+        return positions[1:]
 
     def compute_ee_angle(self, given_config):
         '''
@@ -54,19 +63,25 @@ class Robot(object):
         @param link_angle previous link angle.
         @param given_angle Given joint angle.
         '''
-        if link_angle + given_angle > np.pi:
-            return link_angle + given_angle - 2*np.pi
-        elif link_angle + given_angle < -np.pi:
-            return link_angle + given_angle + 2*np.pi
+        total_angle = link_angle + given_angle
+        if total_angle > np.pi:
+            return total_angle - 2*np.pi
+        elif total_angle < -np.pi:
+            return total_angle + 2*np.pi
         else:
-            return link_angle + given_angle
+            return total_angle
         
     def validate_robot(self, robot_positions):
         '''
         Verify that the given set of links positions does not contain self collisions.
         @param robot_positions Given links positions.
         '''
-        # TODO: Task 2.2
-
-        pass
-    
+        links = [] # type: List[LineString]
+        for i in range(len(robot_positions) - 1):
+            links.append(LineString((robot_positions[i], robot_positions[i+1])))
+        
+        for i in range(len(links) - 2):
+            if any([links[i].intersects(other_link) for other_link in links[i + 2:]]):
+                return False
+        return True
+        

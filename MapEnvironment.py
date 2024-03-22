@@ -50,6 +50,11 @@ class MapEnvironment(object):
         # if you want to - you can display starting map here
         #self.visualize_map(config=self.start)
 
+        self.edge_checker_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+
+
     def load_obstacles(self, obstacles):
         '''
         A function to load and verify scene obstacles.
@@ -100,7 +105,7 @@ class MapEnvironment(object):
 
         return True
 
-    def edge_validity_checker(self, config1, config2):
+    def backup_edge_validity_checker(self, config1, config2):
         '''
         A function to check if the edge between two configurations is free from collisions. The function will interpolate between the two states to verify
         that the links during motion do not collide with anything.
@@ -138,6 +143,7 @@ class MapEnvironment(object):
                     return False
 
             # verify that all robot joints (and links) are between world boundaries
+            # pretty sure this can be significantly sped up using any instead of where
             if len(np.where(configs_positions[:,:,0] < self.xlimit[0])[0]) > 0 or \
                len(np.where(configs_positions[:,:,1] < self.ylimit[0])[0]) > 0 or \
                len(np.where(configs_positions[:,:,0] > self.xlimit[1])[0]) > 0 or \
@@ -146,18 +152,108 @@ class MapEnvironment(object):
 
         return True
 
+    def edge_validity_checker(self, config1, config2):
+        if self.task == 'mp':
+            if (tuple(config1), tuple(config2)) in self.edge_checker_cache:
+                self.cache_hits += 1
+                return self.edge_checker_cache[(tuple(config1), tuple(config2))]
+            if (tuple(config2), tuple(config1)) in self.edge_checker_cache:
+                self.cache_hits += 1
+                return self.edge_checker_cache[(tuple(config2), tuple(config1))]
+            self.cache_misses += 1
+
+        edge_validity = self._edge_validity_checker(config1, config2)
+        
+        if self.task == 'mp':
+            self.edge_checker_cache[(tuple(config1), tuple(config2))] = edge_validity
+        return edge_validity
+
+    def _edge_validity_checker(self, config1, config2):
+        '''
+        A function to check if the edge between two configurations is free from collisions. The function will interpolate between the two states to verify
+        that the links during motion do not collide with anything.
+        @param config1 The source configuration of the robot.
+        @param config2 The destination configuration of the robot.
+        '''
+        
+        # interpolate between first config and second config to verify that there is no collision during the motion
+        required_diff = 0.05
+        interpolation_steps = int(np.linalg.norm(config2 - config1)//required_diff)
+        if interpolation_steps <= 0:
+            return True
+        
+        interpolated_configs = np.linspace(start=config1, stop=config2, num=interpolation_steps)
+        
+        # compute robot links positions for interpolated configs
+        configs_positions = np.apply_along_axis(self.robot.compute_forward_kinematics, 1, interpolated_configs)
+        
+        if np.any((np.any(configs_positions[:,:,0] < self.xlimit[0]),
+                    np.any(configs_positions[:,:,1] < self.ylimit[0]),
+                    np.any(configs_positions[:,:,0] > self.xlimit[1]),
+                    np.any(configs_positions[:,:,1] > self.ylimit[1]))):
+            return False
+
+        # compute edges between joints to verify that the motion between two configs does not collide with anything
+        for j in range(self.robot.dim):
+            for i in range(interpolation_steps-1):
+                position_line_string = LineString([
+                        (configs_positions[i,j,0],configs_positions[i,j,1]),
+                        (configs_positions[i+1,j,0],configs_positions[i+1,j,1])
+                    ])
+                if np.any([position_line_string.crosses(x) for x in self.obstacles_edges]):
+                    return False
+
+        # add position of robot placement ([0,0] - position of the first joint)
+        configs_positions = np.concatenate([np.zeros((len(configs_positions),1,2)), configs_positions], axis=1)
+
+        # verify that the robot do not collide with itself during motion
+        if not all([self.robot.validate_robot(config_positions) for config_positions in configs_positions]):
+            return False
+
+        return True
+
     def get_inspected_points(self, config):
-        '''
-        A function to compute the set of points that are visible to the robot with the given configuration.
-        The function will return the set of points that is visible in terms of distance and field of view (FOV) and are not hidden by any obstacle.
-        @param config The given configuration of the robot.
-        '''
         # get robot end-effector position and orientation for point of view
         ee_pos = self.robot.compute_forward_kinematics(given_config=config)[-1]
         ee_angle = self.robot.compute_ee_angle(given_config=config)
         
         # define angle range for the ee given its position and field of view (FOV)
         ee_angle_range = np.array([ee_angle - self.robot.ee_fov/2, ee_angle + self.robot.ee_fov/2])
+
+        inspected_points = self.inspection_points.copy()
+        relative_inspected_points = inspected_points - ee_pos
+
+        # filter out points that are not within the visibility range
+        inspected_point_distance = np.linalg.norm(relative_inspected_points, axis=1)
+        within_range_mask = inspected_point_distance <= self.robot.vis_dist
+        inspected_points = inspected_points[within_range_mask]
+        relative_inspected_points = relative_inspected_points[within_range_mask]
+        if len(inspected_points) == 0:
+            return np.array([])
+        
+        # filter out points that are not within the field of view (FOV) of the end-effector
+        inspected_point_angle = [self.compute_angle_of_vector(relative_inspected_point) for relative_inspected_point in relative_inspected_points]
+        within_angle_mask = [self.check_if_angle_in_range(angle, ee_angle_range) for angle in inspected_point_angle]
+        inspected_points = inspected_points[within_angle_mask]
+        relative_inspected_points = relative_inspected_points[within_angle_mask]
+        if len(inspected_points) == 0:
+            return np.array([])
+
+        # filter out points that are hidden by obstacles
+        ee_to_point_linestrings = [LineString((ee_pos, point)) for point in inspected_points]
+        line_valid_mask = [not any(any(line.intersects(edge) for edge in obstacle_edges) for obstacle_edges in self.obstacles_edges) for line in ee_to_point_linestrings]
+        inspected_points = inspected_points[line_valid_mask]
+            
+        return inspected_points
+
+    def _get_inspected_points(self, config):
+        # get robot end-effector position and orientation for point of view
+        ee_pos = self.robot.compute_forward_kinematics(given_config=config)[-1]
+        ee_angle = self.robot.compute_ee_angle(given_config=config)
+        
+        # define angle range for the ee given its position and field of view (FOV)
+        ee_angle_range = np.array([ee_angle - self.robot.ee_fov/2, ee_angle + self.robot.ee_fov/2])
+
 
         # iterate over all inspection points to find which of them are currently inspected
         inspected_points = np.array([])
@@ -191,6 +287,7 @@ class MapEnvironment(object):
                             inspected_points = np.concatenate([inspected_points, [inspection_point]], axis=0)
 
         return inspected_points
+
 
     def compute_angle_of_vector(self, vec):
         '''
@@ -226,9 +323,12 @@ class MapEnvironment(object):
         @param points1 list of inspected points.
         @param points2 list of inspected points.
         '''
-        # TODO: Task 2.4
-
-        pass
+        try:
+            return np.array(list(set([tuple(x) for x in points1] + [tuple(x) for x in points2])))
+        except TypeError:
+            print(points1)
+            print(points2)
+            exit()
 
     def compute_coverage(self, inspected_points):
         '''
@@ -410,7 +510,7 @@ class MapEnvironment(object):
         else:
             return angle
 
-    def visualize_plan(self, plan):
+    def visualize_plan(self, plan, title=None):
         '''
         Visualize the final plan as a GIF and stores it.
         @param plan Sequence of configs defining the plan.
@@ -441,6 +541,10 @@ class MapEnvironment(object):
             # add robot with current plan step
             plt = self.visualize_robot(plt=plt, config=plan[i])
 
+            # add title to plot
+            if title is not None:
+                plt.title(title)
+    
             # convert plot to image
             canvas = plt.gca().figure.canvas
             canvas.draw()
@@ -449,5 +553,5 @@ class MapEnvironment(object):
             plan_images.append(data)
         
         # store gif
-        plan_time = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-        imageio.mimsave(f'plan_{plan_time}.gif', plan_images, 'GIF', duration=0.05)
+        plan_time = datetime.now().strftime("%d-%m_%H-%M-%S")
+        imageio.mimsave(f'plan_{plan_time}_cost_{np.sum(np.linalg.norm(np.diff(plan, axis=0), axis=1)):.2f}.gif', plan_images, 'GIF', duration=0.05)
