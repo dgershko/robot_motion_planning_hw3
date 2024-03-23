@@ -140,8 +140,8 @@ class RRTInspectionPlanner(object):
 
     def rewire_tree(self):
         for state in self.tree.vertices.keys():
-            other_states = list(self.tree.vertices.keys())
-            other_states.remove(state)
+            # other_states = list(self.tree.vertices.keys())
+            other_states = self.tree.get_knn_states(state, int(np.log(len(self.tree.vertices))))
             # filter out states which are children of the current state
             other_states = [other_state for other_state in other_states if state not in self.tree.path_to_state(other_state)[0]]
             dominating_states = self.local_dominated(np.array(state), np.array(other_states))
