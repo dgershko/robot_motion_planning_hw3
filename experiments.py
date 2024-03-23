@@ -65,6 +65,6 @@ def parse_results(coverage_target=0.5):
 if __name__ == "__main__":
     # parse_results()
     while True:
-        do_ip_experiment(50, 0.75, OptimizationMode.LocalDominanceByCov)
-        do_ip_experiment(50, 0.75, OptimizationMode.LocalDominanceByCost)
+        do_ip_experiment(50, 0.75, OptimizationMode.LocalDominance)
+        do_ip_experiment(50, 0.75, OptimizationMode.GlobalDominance)
         do_ip_experiment(50, 0.75, OptimizationMode.NoOptimization)

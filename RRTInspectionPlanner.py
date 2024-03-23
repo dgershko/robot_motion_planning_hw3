@@ -7,7 +7,7 @@ from enum import Enum
 
 class OptimizationMode(Enum):
     NoOptimization = "NoOptimization"
-    LocalDominanceByCov = "LocalDominance"
+    LocalDominance = "LocalDominance"
     GlobalDominance = "GlobalDominance"
 
 class RRTInspectionPlanner(object):
