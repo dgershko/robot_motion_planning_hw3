@@ -29,7 +29,6 @@ class MapEnvironment(object):
         self.ylimit = [0, json_dict['HEIGHT']-1]
         self.start = np.array(json_dict['START'])
         self.load_obstacles(obstacles=json_dict['OBSTACLES'])
-
         # taks is inpsection planning
         if self.task == 'ip':
             self.inspection_points = np.array(json_dict['INSPECTION_POINTS'])
@@ -41,11 +40,11 @@ class MapEnvironment(object):
 
         # check that the start location is within limits and collision free
         if not self.config_validity_checker(config=self.start):
-            raise ValueError('Start config must be within the map limits');
+            raise ValueError('Start config must be within the map limits')
 
         # check that the goal location is within limits and collision free
         if self.task == 'mp' and not self.config_validity_checker(config=self.goal):
-            raise ValueError('Goal config must be within the map limits');
+            raise ValueError('Goal config must be within the map limits')
 
         # if you want to - you can display starting map here
         #self.visualize_map(config=self.start)
@@ -130,6 +129,7 @@ class MapEnvironment(object):
             # check collision for each edge between joints and each obstacle
             for edge_pos in edges_between_positions:
                 for obstacle_edges in self.obstacles_edges:
+                    obstacle_edges: list[LineString]
                     obstacle_collisions = [edge_pos.crosses(x) for x in obstacle_edges]
                     if any(obstacle_collisions):
                         return False
@@ -200,7 +200,7 @@ class MapEnvironment(object):
                         (configs_positions[i,j,0],configs_positions[i,j,1]),
                         (configs_positions[i+1,j,0],configs_positions[i+1,j,1])
                     ])
-                if np.any([position_line_string.crosses(x) for x in self.obstacles_edges]):
+                if np.any([np.any([position_line_string.crosses(x) for x in obstacle_edges]) for obstacle_edges in self.obstacles_edges]):
                     return False
 
         # add position of robot placement ([0,0] - position of the first joint)

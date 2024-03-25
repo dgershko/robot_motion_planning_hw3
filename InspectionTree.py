@@ -106,14 +106,12 @@ class RRTree():
         cost = self.robot.compute_distance(state, new_parent)
         state = tuple(state)
         new_parent = tuple(new_parent)
-        # debug check: test that the new total inspected points matches expectations
         new_parent_node = self.vertices[new_parent]
         state_node = self.vertices[state]
         state_node.parent = new_parent_node
-        state_node.inspected_points = self.inspected_points_in_edge(new_parent, state)
-        assert self.vertices[state].parent == new_parent_node
         state_node.cost = cost
         if self.mode == TreeMode.Inspection:
+            state_node.inspected_points = self.inspected_points_in_edge(new_parent, state)
             new_coverage = self.env.compute_coverage(self.vertices[state].total_inspected_points)
             if new_coverage > self.max_coverage:
                 self.max_coverage = new_coverage

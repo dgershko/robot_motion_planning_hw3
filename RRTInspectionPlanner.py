@@ -8,7 +8,8 @@ from enum import Enum
 class OptimizationMode(Enum):
     NoOptimization = "NoOptimization"
     LocalDominance = "LocalDominance"
-    GlobalDominance = "GlobalDominance"
+    GlobalDominance20 = "GlobalDominance20"
+    GlobalDominance100 = "GlobalDominance100"
 
 class RRTInspectionPlanner(object):
 
@@ -51,7 +52,9 @@ class RRTInspectionPlanner(object):
                     dominating_parents = self.local_dominated(new_state, near_states)
                     if len(dominating_parents) > 0:
                         self.update_parent(new_state, dominating_parents)
-                elif optimization_mode == OptimizationMode.GlobalDominance and len(self.tree.vertices) % 100 == 0:
+                elif optimization_mode == OptimizationMode.GlobalDominance20 and len(self.tree.vertices) % 20 == 0:
+                    self.rewire_tree()
+                elif optimization_mode == OptimizationMode.GlobalDominance100 and len(self.tree.vertices) % 100 == 0:
                     self.rewire_tree()
 
             if self.tree.max_coverage > max_coverage:

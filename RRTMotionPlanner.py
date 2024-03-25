@@ -3,6 +3,12 @@ from RRTTree import RRTTree
 import time
 from InspectionTree import RRTree, TreeMode
 from MapEnvironment import MapEnvironment
+from enum import Enum
+
+class RRTMode(Enum):
+    RRT = "RRT"
+    RRTStar = "RRTStar"
+
 
 class RRTMotionPlanner(object):
 
@@ -18,48 +24,47 @@ class RRTMotionPlanner(object):
         self.goal_prob = goal_prob
         self.goal_state = self.planning_env.goal
 
-    def plan(self):
+    def plan(self, rrt_mode: RRTMode = RRTMode.RRT, verbose=True, return_logs=False):
         '''
         Compute and return the plan. The function should return a numpy array containing the states in the configuration space.
         '''
-        start_time = time.time()
+        start_time = time.perf_counter()
         # initialize an empty plan.
         plan = []
         goal_found = False
         num_iterations = 0
-        while not goal_found or num_iterations < 500:
+        while not goal_found:
             rand_state = self.get_random_configuration()
             near_state = self.tree.get_nearest_state(rand_state)
             new_state = self.extend(near_state, rand_state)
             if not self.planning_env.config_validity_checker(new_state):
                 continue # new state is not valid
             if self.planning_env.edge_validity_checker(near_state, new_state):
-                # print(f"inserting state #{len(self.tree.vertices)} during iteration {num_iterations}: {new_state}")
-                if len(self.tree.vertices) % 10 == 0:
-                    print(f"iteration {num_iterations}, vertices: {len(self.tree.vertices)}")
+                # if len(self.tree.vertices) % 10 == 0:
+                #     print(f"iteration {num_iterations}, vertices: {len(self.tree.vertices)}")
                 self.tree.insert_state(new_state, near_state)
 
-                near_states = self.tree.get_knn_states(new_state, int(np.log(len(self.tree.vertices))))
-                near_states = [state for state in near_states if self.planning_env.edge_validity_checker(state, new_state)]
-                for state in near_states:
-                    self.rewire(state, new_state)
-                for state in near_states:
-                    self.rewire(new_state, state)
+                if rrt_mode == RRTMode.RRTStar:
+                    near_states = self.tree.get_knn_states(new_state, int(np.log(len(self.tree.vertices))))
+                    near_states = [state for state in near_states if self.planning_env.edge_validity_checker(state, new_state)]
+                    for state in near_states:
+                        self.rewire(state, new_state)
+                    for state in near_states:
+                        self.rewire(new_state, state)
                 
                 if np.array_equal(new_state, self.goal_state):
                     goal_found = True
-                    # print(f"Goal found at iteration {num_iterations}!")
             num_iterations += 1
         
+        total_time = time.perf_counter() - start_time
         plan, cost = self.tree.path_to_state(self.goal_state)
-        # assert cost == self.compute_cost(plan)
-        if round(cost, 3) != round(self.compute_cost(plan), 3):
-            print(f"cost: {cost}, computed cost: {self.compute_cost(plan)}")
-            raise ValueError("Cost mismatch")
-        # print total path cost and time
-        print('Total cost of path: {:.2f}'.format(self.compute_cost(plan)))
-        print('Total time: {:.2f}'.format(time.time()-start_time))
-        print(f"cache stats: {self.planning_env.cache_hits} hits, {self.planning_env.cache_misses} misses")
+        if verbose:
+            print('Total cost of path: {:.2f}'.format(self.compute_cost(plan)))
+            print('Total time: {:.2f}'.format(total_time))
+            print(f"cache stats: {self.planning_env.cache_hits} hits, {self.planning_env.cache_misses} misses")
+
+        if return_logs:
+            return np.array(plan), cost, total_time
 
         return np.array(plan)
 
