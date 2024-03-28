@@ -20,6 +20,7 @@ class RRTree():
         self.max_coverage = 0
         self.max_coverage_state = 0
         self.max_step_size = 0.1
+        self.state_array = np.array([root_state])
 
     def inspected_points_in_edge(self, start, end):
         num_interpolated_points = int(np.ceil(np.linalg.norm(np.array(end) - np.array(start)) / self.max_step_size))
@@ -48,15 +49,15 @@ class RRTree():
             if new_point_coverage > self.max_coverage:
                 self.max_coverage = new_point_coverage
                 self.max_coverage_state = state
+        self.state_array = np.append(self.state_array, np.array(state).reshape(1,-1), axis=0)
     
     def distances_to_state(self, state, states):
         return np.linalg.norm(states - state, axis=1)
     
     def get_nearest_state(self, state: np.ndarray):
-        vertices = list(self.vertices.keys())
-        distances = self.distances_to_state(state, np.array(vertices))
+        distances = self.distances_to_state(state, self.state_array)
         nearest_vertex_index = np.argmin(distances)
-        return vertices[nearest_vertex_index]
+        return self.state_array[nearest_vertex_index]
 
     def cost_to_state(self, state):
         return self.vertices[tuple(state)].total_cost

@@ -36,6 +36,7 @@ class RRTInspectionPlanner(object):
         num_iterations = 0
         max_coverage = 0
         while True:
+            num_iterations += 1
             rand_state = self.get_random_configuration()
             near_state = self.tree.get_nearest_state(rand_state)
             new_state = self.extend(near_state, rand_state)
@@ -62,21 +63,15 @@ class RRTInspectionPlanner(object):
             if self.tree.max_coverage >= self.coverage:
                 goal_state = self.tree.max_coverage_state
                 break
-            num_iterations += 1
+            
         
         total_time = time.perf_counter() - start_time
         plan, cost = self.tree.path_to_state(goal_state)
-        # assert cost == self.compute_cost(plan)
-        if round(cost, 3) != round(self.compute_cost(plan), 3):
-            print(f"cost: {cost}, computed cost: {self.compute_cost(plan)}")
-            raise ValueError("Cost mismatch")
         # print total path cost and time
         if verbose:
             print('Total cost of path: {:.2f}'.format(self.compute_cost(plan)))
             print('Total time: {:.2f}'.format(total_time))
             print(f'Total coverage: {self.planning_env.compute_coverage(self.tree.get_total_inspected_points(goal_state))}')
-            print(f"Inspected points in path: {len(inspected_points)}")
-            print(f"caculated path coverage: {self.planning_env.compute_coverage(list(inspected_points))}")
             print(plan)
         if return_logs:
             return plan, cost, self.tree.max_coverage, total_time

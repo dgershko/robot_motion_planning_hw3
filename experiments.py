@@ -3,6 +3,7 @@ import numpy as np
 import os
 import pandas as pd
 import csv
+from itertools import product
 
 from MapEnvironment import MapEnvironment
 from RRTMotionPlanner import RRTMotionPlanner, RRTMode
@@ -61,7 +62,7 @@ def do_ip_experiment(num_experiments, coverage_target, optimization_mode):
                 plan_list = [tuple(point) for point in plan]
                 writer.writerow([optimization_mode.value, len(plan), cost, coverage, time, coverage_target, plan_list])
 
-def parse_ip_results(coverage_target=0.5):
+def parse_ip_results(coverage_target=0.5, visualize=False):
     df = pd.read_csv("ip_results.csv")
     df = df[df["coverage_target"] == coverage_target]
     unique_modes = df["mode"].unique()
@@ -80,20 +81,23 @@ def parse_ip_results(coverage_target=0.5):
         }
         table = pd.concat([table, pd.DataFrame(row, index=[0])], ignore_index=True)
     print(table)
+    if not visualize:
+        return
     # Find the plan that corresponds to the shortest path in each mode:
-    # for mode in unique_modes:
-    #     mode_df = df[df["mode"] == mode]
-    #     min_cost = mode_df["cost"].min()
-    #     best_plan = mode_df[mode_df["cost"] == min_cost].iloc[0]["plan"]
-    #     best_plan_coverage = mode_df[mode_df["cost"] == min_cost].iloc[0]["coverage"]
-    #     # convert plan to numpy array
-    #     best_plan = np.array([np.array(point) for point in eval(best_plan)])
-    #     env = MapEnvironment("map_ip.json", "ip")
-    #     title = f"Best plan for mode: {mode}, target coverage: {coverage_target}\ncost: {min_cost:.3f} coverage: {best_plan_coverage:.3f}"
-    #     env.visualize_plan(best_plan, title)
+    for mode in unique_modes:
+        mode_df = df[df["mode"] == mode]
+        min_cost = mode_df["cost"].min()
+        best_plan = mode_df[mode_df["cost"] == min_cost].iloc[0]["plan"]
+        best_plan_coverage = mode_df[mode_df["cost"] == min_cost].iloc[0]["coverage"]
+        # convert plan to numpy array
+        best_plan = np.array([np.array(point) for point in eval(best_plan)])
+        env = MapEnvironment("map_ip.json", "ip")
+        title = f"Best plan for mode: {mode}, target coverage: {coverage_target}\ncost: {min_cost:.3f} coverage: {best_plan_coverage:.3f}"
+        filename = f"best_ip_plan_{mode}_{coverage_target}"
+        env.visualize_plan(best_plan, title, filename=filename)
 
 
-def parse_mp_results():
+def parse_mp_results(visualize):
     df = pd.read_csv("mp_results.csv")
     unique_rrt_modes = df["rrt_mode"].unique()
     unique_goal_biases = df["goal_bias"].unique()
@@ -113,15 +117,32 @@ def parse_mp_results():
             }
             table = pd.concat([table, pd.DataFrame(row, index=[0])], ignore_index=True)
     print(table)
+    if not visualize:
+        return
+    for mode, goal_bias in product(unique_rrt_modes, unique_goal_biases):
+        mode_df = df[df["rrt_mode"] == mode]
+        min_cost = mode_df["cost"].min()
+        best_plan = mode_df[mode_df["cost"] == min_cost].iloc[0]["plan"]
+        # convert plan to numpy array
+        best_plan = np.array([np.array(point) for point in eval(best_plan)])
+        env = MapEnvironment("map_mp.json", "mp")
+        title = f"Best plan for mode: {mode}, goal bias: {goal_bias}\ncost: {min_cost:.3f}"
+        filename = f"best_mp_plan_{mode}_{goal_bias}"
+        env.visualize_plan(best_plan, title, filename=filename)
 
 if __name__ == "__main__":
-    # parse_ip_results(0.75)
-    # parse_mp_results()
+    # parse_ip_results(0.5, visualize=True)
+    print("=========================================================")
+    # parse_ip_results(0.75, visualize=False)
+    print("=========================================================")
+    # parse_mp_results(visualize=False)
     while True:
         do_ip_experiment(50, 0.5, OptimizationMode.LocalDominance)
-        do_ip_experiment(50, 0.5, OptimizationMode.GlobalDominance20)
         do_ip_experiment(50, 0.5, OptimizationMode.GlobalDominance100)
         do_ip_experiment(50, 0.5, OptimizationMode.NoOptimization)
+        do_ip_experiment(50, 0.75, OptimizationMode.LocalDominance)
+        do_ip_experiment(50, 0.75, OptimizationMode.GlobalDominance100)
+        do_ip_experiment(50, 0.75, OptimizationMode.NoOptimization)
 
         # do_mp_experiment(50, 0.05, RRTMode.RRTStar)
         # do_mp_experiment(50, 0.05, RRTMode.RRT)

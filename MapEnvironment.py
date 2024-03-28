@@ -84,13 +84,13 @@ class MapEnvironment(object):
         # add position of robot placement ([0,0] - position of the first joint)
         robot_positions = np.concatenate([np.zeros((1,2)), robot_positions])
 
-        # verify that the robot do not collide with itself
-        if not self.robot.validate_robot(robot_positions=robot_positions):
-            return False
-
         # verify that all robot joints (and links) are between world boundaries
         non_applicable_poses = [(x[0] < self.xlimit[0] or x[1] < self.ylimit[0] or x[0] > self.xlimit[1] or x[1] > self.ylimit[1]) for x in robot_positions]
         if any(non_applicable_poses):
+            return False
+
+        # verify that the robot do not collide with itself
+        if not self.robot.validate_robot(robot_positions=robot_positions):
             return False
 
         # verify that all robot links do not collide with obstacle edges
@@ -98,8 +98,7 @@ class MapEnvironment(object):
         robot_links = [LineString([Point(x[0],x[1]),Point(y[0],y[1])]) for x,y in zip(robot_positions.tolist()[:-1], robot_positions.tolist()[1:])]
         for obstacle_edges in self.obstacles_edges:
             for robot_link in robot_links:
-                obstacle_collisions = [robot_link.crosses(x) for x in obstacle_edges]
-                if any(obstacle_collisions):
+                if any([robot_link.crosses(x) for x in obstacle_edges]):
                     return False
 
         return True
@@ -510,7 +509,7 @@ class MapEnvironment(object):
         else:
             return angle
 
-    def visualize_plan(self, plan, title=None):
+    def visualize_plan(self, plan, title=None, filename=None):
         '''
         Visualize the final plan as a GIF and stores it.
         @param plan Sequence of configs defining the plan.
@@ -553,5 +552,8 @@ class MapEnvironment(object):
             plan_images.append(data)
         
         # store gif
-        plan_time = datetime.now().strftime("%d-%m_%H-%M-%S")
-        imageio.mimsave(f'plan_{plan_time}_cost_{np.sum(np.linalg.norm(np.diff(plan, axis=0), axis=1)):.2f}.gif', plan_images, 'GIF', duration=0.05)
+        if filename is not None:
+            imageio.mimsave(f'{filename}.gif', plan_images, 'GIF', duration=0.05)
+        else:
+            plan_time = datetime.now().strftime("%d-%m_%H-%M-%S")
+            imageio.mimsave(f'plan_{plan_time}_cost_{np.sum(np.linalg.norm(np.diff(plan, axis=0), axis=1)):.2f}.gif', plan_images, 'GIF', duration=0.05)
