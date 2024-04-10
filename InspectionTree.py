@@ -91,7 +91,10 @@ class RRTree():
     def get_knn_states(self, pivot_state: np.ndarray, k: int):
         pivot_state_tuple = tuple(pivot_state)
         states_arr = list(self.vertices.keys())
-        states_arr.remove(pivot_state_tuple)
+        try:
+            states_arr.remove(pivot_state_tuple)
+        except:
+            pass
         states_arr = np.array(states_arr)
         if len(states_arr) <= k:
             return states_arr

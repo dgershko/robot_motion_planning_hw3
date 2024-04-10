@@ -4,10 +4,12 @@ import os
 import pandas as pd
 import csv
 from itertools import product
+import matplotlib.pyplot as plt
 
 from MapEnvironment import MapEnvironment
 from RRTMotionPlanner import RRTMotionPlanner, RRTMode
 from RRTInspectionPlanner import RRTInspectionPlanner, OptimizationMode
+import seaborn as sns
 
 
 def run_mp(args):
@@ -77,7 +79,7 @@ def parse_ip_results(coverage_target=0.5, visualize=False):
             "Average Time": mode_df['time'].mean(),
             "Number of Experiments": len(mode_df),
             "Cheapest Path": mode_df['cost'].min(),
-            "Average Time of Top 90%": mode_df[mode_df['time'] <= mode_df['time'].quantile(0.9)]['time'].mean()
+            "Average Time of Top 90%": mode_df[mode_df['time'] <= mode_df['time'].quantile(0.8)]['time'].mean()
         }
         table = pd.concat([table, pd.DataFrame(row, index=[0])], ignore_index=True)
     print(table)
@@ -130,19 +132,40 @@ def parse_mp_results(visualize):
         filename = f"best_mp_plan_{mode}_{goal_bias}"
         env.visualize_plan(best_plan, title, filename=filename)
 
+
+def plot_time_distribution(coverage_target=0.5):
+    df = pd.read_csv("ip_results.csv")
+    df = df[df["coverage_target"] == coverage_target]
+    sns.histplot(df, x="time", hue="mode", kde=True, stat="probability", bins=1500, multiple='dodge')
+    plt.xlabel("Time taken (s)")
+    plt.ylabel("Probability")
+    plt.xlim(0,300)
+    # plt.legend()
+    plt.title(f"Time distribution for target coverage: {coverage_target}")
+    plt.show()
+
 if __name__ == "__main__":
-    # parse_ip_results(0.5, visualize=True)
-    print("=========================================================")
+    # plot_time_distribution(0.75)
+    # parse_ip_results(0.5, visualize=False)
+    # print("=========================================================")
     # parse_ip_results(0.75, visualize=False)
-    print("=========================================================")
+    # print("=========================================================")
     # parse_mp_results(visualize=False)
     while True:
-        do_ip_experiment(50, 0.5, OptimizationMode.LocalDominance)
-        do_ip_experiment(50, 0.5, OptimizationMode.GlobalDominance100)
-        do_ip_experiment(50, 0.5, OptimizationMode.NoOptimization)
-        do_ip_experiment(50, 0.75, OptimizationMode.LocalDominance)
-        do_ip_experiment(50, 0.75, OptimizationMode.GlobalDominance100)
+        do_ip_experiment(50, 0.7, OptimizationMode.MultiAdd)
+        do_ip_experiment(50, 0.75, OptimizationMode.MultiAdd)
+        do_ip_experiment(50, 0.8, OptimizationMode.MultiAdd)
+        do_ip_experiment(50, 0.85, OptimizationMode.MultiAdd)
+        do_ip_experiment(50, 0.7, OptimizationMode.NoOptimization)
         do_ip_experiment(50, 0.75, OptimizationMode.NoOptimization)
+        do_ip_experiment(50, 0.8, OptimizationMode.NoOptimization)
+        do_ip_experiment(50, 0.85, OptimizationMode.NoOptimization)
+    #     do_ip_experiment(50, 0.5, OptimizationMode.LocalDominance)
+    #     do_ip_experiment(50, 0.5, OptimizationMode.GlobalDominance100)
+    #     do_ip_experiment(50, 0.5, OptimizationMode.NoOptimization)
+    #     do_ip_experiment(50, 0.75, OptimizationMode.LocalDominance)
+    #     do_ip_experiment(50, 0.75, OptimizationMode.GlobalDominance100)
+    #     do_ip_experiment(50, 0.75, OptimizationMode.NoOptimization)
 
         # do_mp_experiment(50, 0.05, RRTMode.RRTStar)
         # do_mp_experiment(50, 0.05, RRTMode.RRT)

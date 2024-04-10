@@ -8,8 +8,9 @@ from enum import Enum
 class OptimizationMode(Enum):
     NoOptimization = "NoOptimization"
     LocalDominance = "LocalDominance"
-    GlobalDominance20 = "GlobalDominance20"
-    GlobalDominance100 = "GlobalDominance100"
+    GlobalDominance = "GlobalDominance"
+    MultiTree = "MultiTree"
+    MultiAdd = "MultiAdd"
 
 class RRTInspectionPlanner(object):
 
@@ -33,6 +34,94 @@ class RRTInspectionPlanner(object):
         self.optimization_mode = optimization_mode
         start_time = time.perf_counter()
         plan = []
+        if self.optimization_mode == OptimizationMode.NoOptimization:
+            plan, cost = self.normal_plan()
+        elif self.optimization_mode == OptimizationMode.LocalDominance:
+            plan, cost = self.local_dominance_plan()
+        elif self.optimization_mode == OptimizationMode.GlobalDominance:
+            plan, cost = self.global_dominance_plan()
+        # elif self.optimization_mode == OptimizationMode.MultiTree:
+        #     plan, cost = self.multi_tree_plan()
+        elif self.optimization_mode == OptimizationMode.MultiAdd:
+            plan, cost = self.multi_add_plan()
+        
+        total_time = time.perf_counter() - start_time
+        goal_state = plan[-1]
+        # print total path cost and time
+        if verbose:
+            print('Total cost of path: {:.2f}'.format(self.compute_cost(plan)))
+            print('Total time: {:.2f}'.format(total_time))
+            print(f'Total coverage: {self.planning_env.compute_coverage(self.tree.get_total_inspected_points(goal_state))}')
+            print(plan)
+        if return_logs:
+            return plan, cost, self.tree.max_coverage, total_time
+        return plan
+
+    def normal_plan(self) -> tuple[np.ndarray, float]:
+        num_iterations = 0
+        max_coverage = 0
+        while True:
+            num_iterations += 1
+            rand_state = self.get_random_configuration()
+            near_state = self.tree.get_nearest_state(rand_state)
+            new_state = self.extend(near_state, rand_state)
+            if not self.planning_env.config_validity_checker(new_state):
+                continue
+            if self.planning_env.edge_validity_checker(near_state, new_state):
+                inspected_points = self.planning_env.get_inspected_points(new_state)
+                self.tree.insert_state(new_state, near_state, inspected_points)
+
+            if self.tree.max_coverage > max_coverage:
+                max_coverage = self.tree.max_coverage
+            if self.tree.max_coverage >= self.coverage:
+                goal_state = self.tree.max_coverage_state
+                break
+
+        return self.tree.path_to_state(goal_state)
+
+
+    def multi_add_plan(self) -> tuple[np.ndarray, float]:
+        '''
+        Compute and return the plan. The function should return a numpy array containing the states in the configuration space.
+        '''
+        num_iterations = 0
+        max_coverage = 0
+        while True:
+            num_iterations += 1
+            rand_state = self.get_random_configuration()
+            near_state = self.tree.get_nearest_state(rand_state)
+            new_state = self.extend(near_state, rand_state)
+            if not self.planning_env.config_validity_checker(new_state):
+                continue
+            if self.planning_env.edge_validity_checker(near_state, new_state):
+                inspected_points = self.tree.inspected_points_in_edge(near_state, new_state)
+                num_perturbations = 2 * (len(inspected_points) ** 2) # 2 * (n^2) perturbations
+                # limit the number of perturbations to the log of the number of vertices in the tree
+                # log_vertices = int(np.log(len(self.tree.vertices)))
+                # num_perturbations = min(num_perturbations, log_vertices)
+                # num_perturbations = min(num_perturbations, len(self.tree.vertices) - 1)
+                num_perturbations = min(num_perturbations, len(self.tree.vertices) // 2)
+                if num_perturbations <= 1:
+                    self.tree.insert_state(new_state, near_state, inspected_points)
+                    continue
+                k_nearest_neighbors = self.tree.get_knn_states(near_state, num_perturbations)
+                for i in range(num_perturbations):
+                    parent_state = k_nearest_neighbors[i]
+                    perturbed_state = new_state + np.random.normal(0, 0.00001, size=4)
+                    if not self.planning_env.edge_validity_checker(parent_state, perturbed_state):
+                        continue
+                    self.tree.insert_state(perturbed_state, parent_state, inspected_points)
+
+            if self.tree.max_coverage > max_coverage:
+                max_coverage = self.tree.max_coverage
+                print(f"max coverage: {max_coverage}, num iterations: {num_iterations}, num vertices: {len(self.tree.vertices)}")
+            if self.tree.max_coverage >= self.coverage:
+                goal_state = self.tree.max_coverage_state
+                break
+    
+        return self.tree.path_to_state(goal_state)
+
+    def local_dominance_plan(self) -> tuple[np.ndarray, float]:
         num_iterations = 0
         max_coverage = 0
         while True:
@@ -45,37 +134,44 @@ class RRTInspectionPlanner(object):
             if self.planning_env.edge_validity_checker(near_state, new_state):
                 inspected_points = self.planning_env.get_inspected_points(new_state)
                 self.tree.insert_state(new_state, near_state, inspected_points)
-                if verbose and len(self.tree.vertices) % 100 == 0:
-                    print(f"Iteration {num_iterations}, Number of vertices: {len(self.tree.vertices)}")
                 # local dominance optimization
-                if optimization_mode == OptimizationMode.LocalDominance:
-                    near_states = self.tree.get_knn_states(new_state, int(np.log(len(self.tree.vertices))))
-                    dominating_parents = self.local_dominated(new_state, near_states)
-                    if len(dominating_parents) > 0:
-                        self.update_parent(new_state, dominating_parents)
-                elif optimization_mode == OptimizationMode.GlobalDominance20 and len(self.tree.vertices) % 20 == 0:
-                    self.rewire_tree()
-                elif optimization_mode == OptimizationMode.GlobalDominance100 and len(self.tree.vertices) % 100 == 0:
-                    self.rewire_tree()
+                near_states = self.tree.get_knn_states(new_state, int(np.log(len(self.tree.vertices))))
+                dominating_parents = self.local_dominated(new_state, near_states)
+                if len(dominating_parents) > 0:
+                    self.update_parent(new_state, dominating_parents)
 
             if self.tree.max_coverage > max_coverage:
                 max_coverage = self.tree.max_coverage
             if self.tree.max_coverage >= self.coverage:
                 goal_state = self.tree.max_coverage_state
                 break
-            
         
-        total_time = time.perf_counter() - start_time
-        plan, cost = self.tree.path_to_state(goal_state)
-        # print total path cost and time
-        if verbose:
-            print('Total cost of path: {:.2f}'.format(self.compute_cost(plan)))
-            print('Total time: {:.2f}'.format(total_time))
-            print(f'Total coverage: {self.planning_env.compute_coverage(self.tree.get_total_inspected_points(goal_state))}')
-            print(plan)
-        if return_logs:
-            return plan, cost, self.tree.max_coverage, total_time
-        return plan
+        return self.tree.path_to_state(goal_state)
+    
+    def global_dominance_plan(self, rewire_iters = 100) -> tuple[np.ndarray, float]:
+        num_iterations = 0
+        max_coverage = 0
+        while True:
+            num_iterations += 1
+            rand_state = self.get_random_configuration()
+            near_state = self.tree.get_nearest_state(rand_state)
+            new_state = self.extend(near_state, rand_state)
+            if not self.planning_env.config_validity_checker(new_state):
+                continue
+            if self.planning_env.edge_validity_checker(near_state, new_state):
+                inspected_points = self.planning_env.get_inspected_points(new_state)
+                self.tree.insert_state(new_state, near_state, inspected_points)
+                # global dominance optimization
+                if len(self.tree.vertices) % rewire_iters == 0:
+                    self.rewire_tree()
+            
+            if self.tree.max_coverage > max_coverage:
+                max_coverage = self.tree.max_coverage
+            if self.tree.max_coverage >= self.coverage:
+                goal_state = self.tree.max_coverage_state
+                break
+
+        return self.tree.path_to_state(goal_state)
 
     def compute_cost(self, plan):
         '''

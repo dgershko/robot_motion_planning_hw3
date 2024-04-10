@@ -1,5 +1,5 @@
 import os
-import time
+from time import perf_counter
 from datetime import datetime
 import json
 import numpy as np
@@ -15,7 +15,6 @@ import imageio
 class MapEnvironment(object):
     
     def __init__(self, json_file, task):
-
         # check if json file exists and load
         json_path = os.path.join(os.getcwd(), json_file)
         if not os.path.isfile(json_path):
@@ -49,10 +48,6 @@ class MapEnvironment(object):
         # if you want to - you can display starting map here
         #self.visualize_map(config=self.start)
 
-        self.edge_checker_cache = {}
-        self.cache_hits = 0
-        self.cache_misses = 0
-
 
     def load_obstacles(self, obstacles):
         '''
@@ -85,8 +80,7 @@ class MapEnvironment(object):
         robot_positions = np.concatenate([np.zeros((1,2)), robot_positions])
 
         # verify that all robot joints (and links) are between world boundaries
-        non_applicable_poses = [(x[0] < self.xlimit[0] or x[1] < self.ylimit[0] or x[0] > self.xlimit[1] or x[1] > self.ylimit[1]) for x in robot_positions]
-        if any(non_applicable_poses):
+        if any([(x[0] < self.xlimit[0] or x[1] < self.ylimit[0] or x[0] > self.xlimit[1] or x[1] > self.ylimit[1]) for x in robot_positions]):
             return False
 
         # verify that the robot do not collide with itself
@@ -95,79 +89,17 @@ class MapEnvironment(object):
 
         # verify that all robot links do not collide with obstacle edges
         # for each obstacle, check collision with each of the robot links
-        robot_links = [LineString([Point(x[0],x[1]),Point(y[0],y[1])]) for x,y in zip(robot_positions.tolist()[:-1], robot_positions.tolist()[1:])]
+        # robot_links = [LineString([Point(x[0],x[1]),Point(y[0],y[1])]) for x,y in zip(robot_positions.tolist()[:-1], robot_positions.tolist()[1:])]
         for obstacle_edges in self.obstacles_edges:
-            for robot_link in robot_links:
-                if any([robot_link.crosses(x) for x in obstacle_edges]):
+            # for robot_link in robot_links:
+            for x, y in zip(robot_positions.tolist()[:-1], robot_positions.tolist()[1:]):
+                link = LineString([Point(x[0],x[1]),Point(y[0],y[1])])
+                if any([link.crosses(x) for x in obstacle_edges]):
                     return False
-
-        return True
-
-    def backup_edge_validity_checker(self, config1, config2):
-        '''
-        A function to check if the edge between two configurations is free from collisions. The function will interpolate between the two states to verify
-        that the links during motion do not collide with anything.
-        @param config1 The source configuration of the robot.
-        @param config2 The destination configuration of the robot.
-        '''
-        # interpolate between first config and second config to verify that there is no collision during the motion
-        required_diff = 0.05
-        interpolation_steps = int(np.linalg.norm(config2 - config1)//required_diff)
-        if interpolation_steps > 0:
-            interpolated_configs = np.linspace(start=config1, stop=config2, num=interpolation_steps)
-            
-            # compute robot links positions for interpolated configs
-            configs_positions = np.apply_along_axis(self.robot.compute_forward_kinematics, 1, interpolated_configs)
-
-            # compute edges between joints to verify that the motion between two configs does not collide with anything
-            edges_between_positions = []
-            for j in range(self.robot.dim):
-                for i in range(interpolation_steps-1):
-                    edges_between_positions.append(LineString([Point(configs_positions[i,j,0],configs_positions[i,j,1]),Point(configs_positions[i+1,j,0],configs_positions[i+1,j,1])]))
-
-            # check collision for each edge between joints and each obstacle
-            for edge_pos in edges_between_positions:
-                for obstacle_edges in self.obstacles_edges:
-                    obstacle_edges: list[LineString]
-                    obstacle_collisions = [edge_pos.crosses(x) for x in obstacle_edges]
-                    if any(obstacle_collisions):
-                        return False
-
-            # add position of robot placement ([0,0] - position of the first joint)
-            configs_positions = np.concatenate([np.zeros((len(configs_positions),1,2)), configs_positions], axis=1)
-
-            # verify that the robot do not collide with itself during motion
-            for config_positions in configs_positions:
-                if not self.robot.validate_robot(config_positions):
-                    return False
-
-            # verify that all robot joints (and links) are between world boundaries
-            # pretty sure this can be significantly sped up using any instead of where
-            if len(np.where(configs_positions[:,:,0] < self.xlimit[0])[0]) > 0 or \
-               len(np.where(configs_positions[:,:,1] < self.ylimit[0])[0]) > 0 or \
-               len(np.where(configs_positions[:,:,0] > self.xlimit[1])[0]) > 0 or \
-               len(np.where(configs_positions[:,:,1] > self.ylimit[1])[0]) > 0:
-               return False
 
         return True
 
     def edge_validity_checker(self, config1, config2):
-        if self.task == 'mp':
-            if (tuple(config1), tuple(config2)) in self.edge_checker_cache:
-                self.cache_hits += 1
-                return self.edge_checker_cache[(tuple(config1), tuple(config2))]
-            if (tuple(config2), tuple(config1)) in self.edge_checker_cache:
-                self.cache_hits += 1
-                return self.edge_checker_cache[(tuple(config2), tuple(config1))]
-            self.cache_misses += 1
-
-        edge_validity = self._edge_validity_checker(config1, config2)
-        
-        if self.task == 'mp':
-            self.edge_checker_cache[(tuple(config1), tuple(config2))] = edge_validity
-        return edge_validity
-
-    def _edge_validity_checker(self, config1, config2):
         '''
         A function to check if the edge between two configurations is free from collisions. The function will interpolate between the two states to verify
         that the links during motion do not collide with anything.
@@ -186,10 +118,12 @@ class MapEnvironment(object):
         # compute robot links positions for interpolated configs
         configs_positions = np.apply_along_axis(self.robot.compute_forward_kinematics, 1, interpolated_configs)
         
-        if np.any((np.any(configs_positions[:,:,0] < self.xlimit[0]),
-                    np.any(configs_positions[:,:,1] < self.ylimit[0]),
-                    np.any(configs_positions[:,:,0] > self.xlimit[1]),
-                    np.any(configs_positions[:,:,1] > self.ylimit[1]))):
+        if any((
+            np.any([configs_positions[:,:,0] < self.xlimit[0]]),
+            np.any(configs_positions[:,:,1] < self.ylimit[0]),
+            np.any(configs_positions[:,:,0] > self.xlimit[1]),
+            np.any(configs_positions[:,:,1] > self.ylimit[1])
+            )):
             return False
 
         # compute edges between joints to verify that the motion between two configs does not collide with anything
@@ -199,7 +133,7 @@ class MapEnvironment(object):
                         (configs_positions[i,j,0],configs_positions[i,j,1]),
                         (configs_positions[i+1,j,0],configs_positions[i+1,j,1])
                     ])
-                if np.any([np.any([position_line_string.crosses(x) for x in obstacle_edges]) for obstacle_edges in self.obstacles_edges]):
+                if any([any([position_line_string.crosses(x) for x in obstacle_edges]) for obstacle_edges in self.obstacles_edges]):
                     return False
 
         # add position of robot placement ([0,0] - position of the first joint)
@@ -210,6 +144,7 @@ class MapEnvironment(object):
             return False
 
         return True
+
 
     def get_inspected_points(self, config):
         # get robot end-effector position and orientation for point of view
@@ -243,48 +178,6 @@ class MapEnvironment(object):
         line_valid_mask = [not any(any(line.intersects(edge) for edge in obstacle_edges) for obstacle_edges in self.obstacles_edges) for line in ee_to_point_linestrings]
         inspected_points = inspected_points[line_valid_mask]
             
-        return inspected_points
-
-    def _get_inspected_points(self, config):
-        # get robot end-effector position and orientation for point of view
-        ee_pos = self.robot.compute_forward_kinematics(given_config=config)[-1]
-        ee_angle = self.robot.compute_ee_angle(given_config=config)
-        
-        # define angle range for the ee given its position and field of view (FOV)
-        ee_angle_range = np.array([ee_angle - self.robot.ee_fov/2, ee_angle + self.robot.ee_fov/2])
-
-
-        # iterate over all inspection points to find which of them are currently inspected
-        inspected_points = np.array([])
-        for inspection_point in self.inspection_points:
-
-            # compute angle of inspection point w.r.t. position of ee
-            relative_inspection_point = inspection_point - ee_pos
-            inspection_point_angle = self.compute_angle_of_vector(vec=relative_inspection_point)
-
-            # check that the point is potentially visible with the distance from the end-effector
-            if np.linalg.norm(relative_inspection_point) <= self.robot.vis_dist:
-
-                # if the resulted angle is between the angle range of the ee, verify that there are no interfering obstacles
-                if self.check_if_angle_in_range(angle=inspection_point_angle, ee_range=ee_angle_range):
-
-                    # define the segment between the inspection point and the ee
-                    ee_to_inspection_point = LineString([Point(ee_pos[0],ee_pos[1]),Point(inspection_point[0],inspection_point[1])]) 
-                    
-                    # check if there are any collisions of the vector with some obstacle edge
-                    inspection_point_hidden = False
-                    for obstacle_edges in self.obstacles_edges:
-                        for obstacle_edge in obstacle_edges:
-                            if ee_to_inspection_point.intersects(obstacle_edge):
-                                inspection_point_hidden = True
-
-                    # if inspection point is not hidden by any obstacle, add it to the visible inspection points
-                    if not inspection_point_hidden:
-                        if len(inspected_points) == 0:
-                            inspected_points = np.array([inspection_point])
-                        else:
-                            inspected_points = np.concatenate([inspected_points, [inspection_point]], axis=0)
-
         return inspected_points
 
 
